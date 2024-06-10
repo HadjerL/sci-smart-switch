@@ -6,10 +6,10 @@ const char* ssid = "djaweb";
 const char* password = "wooowyyy";
 
 // Replace with your MQTT Broker IP address
-const char* mqtt_server = "192.168.43.32";
+const char* mqtt_server = "broker.emqx.io";
 
 // Define the pin for the LED
-const int ledPin = D0; // Change this to the actual pin connected to your LED
+const int ledPin = D3; // Change this to the actual pin connected to your LED
 
 WiFiClient espClient;
 PubSubClient client(espClient);
