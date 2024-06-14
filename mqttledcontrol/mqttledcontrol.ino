@@ -3,10 +3,10 @@
 #include <PubSubClient.h>
 #include <EEPROM.h>
 
-// Define the pins for the LED and the PIR motion sensor
+// Define the pins for the PIR motion sensor and the smart outlet
 #define PIR_MOTION_SENSOR D1
-#define led D2
-#define connectionLed D3
+#define SMART_OUTLET D2
+#define CONNECTION_LED D3
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -38,7 +38,6 @@ void loadConfig() {
     strcpy(mqtt_server, ""); // Set to empty string if not valid
   }
 }
-
 
 void setup_wifi() {
   // Local initialization. Once its business is done, there is no need to keep it around
@@ -85,14 +84,14 @@ void reconnect() {
       // Once connected, publish an announcement...
       client.publish("OUTTopic", "hello world");
       // ... and resubscribe
-      client.subscribe("smart-led/status");
+      client.subscribe("smart-outlet/status");
       // Indication with LED on
-      digitalWrite(connectionLed, HIGH);
+      digitalWrite(CONNECTION_LED, HIGH);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
       // Indication with LED off
-      digitalWrite(connectionLed, LOW);
+      digitalWrite(CONNECTION_LED, LOW);
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       delay(5000);
@@ -111,19 +110,19 @@ void onMessage(char* topic, uint8_t* payload, unsigned int length) {
   Serial.print("] ");
   Serial.println(message);
 
-  // Control the LED based on the message received
+  // Control the smart outlet based on the message received
   if (message == "1") {
     mqttControlled = true;
-    digitalWrite(led, HIGH); // Turn the LED on
+    digitalWrite(SMART_OUTLET, HIGH); // Turn the smart outlet on
   } else if (message == "0") {
     mqttControlled = false;
-    digitalWrite(led, LOW); // Turn the LED off
+    digitalWrite(SMART_OUTLET, LOW); // Turn the smart outlet off
   } else if (message == "request") {
-    // Publish the current LED state
-    if (digitalRead(led) == HIGH) {
-      client.publish("smart-led/status", "1");
+    // Publish the current smart outlet state
+    if (digitalRead(SMART_OUTLET) == HIGH) {
+      client.publish("smart-outlet/status", "1");
     } else {
-      client.publish("smart-led/status", "0");
+      client.publish("smart-outlet/status", "0");
     }
   }
 }
@@ -137,17 +136,15 @@ void setup() {
   // Load the MQTT server address from EEPROM
   loadConfig();
 
-
-
   setup_wifi();
   client.setServer(mqtt_server, 1883);
 
   // Set the callback function for receiving messages
   client.setCallback(onMessage);
 
-  // Initialize the LED and motion sensor pins as an output and input respectively
-  pinMode(led, OUTPUT);
-  pinMode(connectionLed, OUTPUT);
+  // Initialize the smart outlet and motion sensor pins as an output and input respectively
+  pinMode(SMART_OUTLET, OUTPUT);
+  pinMode(CONNECTION_LED, OUTPUT);
   pinMode(PIR_MOTION_SENSOR, INPUT);
 }
 
@@ -160,16 +157,16 @@ void loop() {
   // Check the state of the motion sensor
   bool currentMotion = digitalRead(PIR_MOTION_SENSOR);
 
-  // Only update the LED state based on motion if it's not controlled by MQTT
+  // Only update the smart outlet state based on motion if it's not controlled by MQTT
   if (!mqttControlled) {
     if (currentMotion != motionDetected) {
       motionDetected = currentMotion;
       if (motionDetected) {
-        digitalWrite(led, HIGH); // Turn the LED on
-        client.publish("smart-led/status", "1");
+        digitalWrite(SMART_OUTLET, HIGH); // Turn the smart outlet on
+        client.publish("smart-outlet/status", "1");
       } else {
-        digitalWrite(led, LOW); // Turn the LED off
-        client.publish("smart-led/status", "0");
+        digitalWrite(SMART_OUTLET, LOW); // Turn the smart outlet off
+        client.publish("smart-outlet/status", "0");
       }
     }
   }
