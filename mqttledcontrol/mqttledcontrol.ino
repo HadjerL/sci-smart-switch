@@ -1,37 +1,78 @@
 #include <ESP8266WiFi.h>
+#include <WiFiManager.h>
 #include <PubSubClient.h>
+#include <EEPROM.h>
 
-// Replace with your network credentials
-const char* ssid = "djaweb";
-const char* password = "wooowyyy";
-
-// Replace with your MQTT Broker IP address
-const char* mqtt_server = "broker.emqx.io";
-
-// Define the pin for the LED
-const int ledPin = D3; // Change this to the actual pin connected to your LED
+// Define the pins for the LED and the PIR motion sensor
+#define PIR_MOTION_SENSOR D1
+#define led D2
+#define connectionLed D3
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
+// Variables to store MQTT server address
+char mqtt_server[40] = "";
+
+// Variables to track the current state
+bool mqttControlled = false;
+bool motionDetected = false;
+
+// EEPROM addresses
+#define EEPROM_MQTT_SERVER_START 0
+#define EEPROM_MQTT_SERVER_SIZE 40
+
+void saveConfig() {
+  for (int i = 0; i < EEPROM_MQTT_SERVER_SIZE; i++) {
+    EEPROM.write(EEPROM_MQTT_SERVER_START + i, mqtt_server[i]);
+  }
+  EEPROM.commit();
+}
+
+void loadConfig() {
+  for (int i = 0; i < EEPROM_MQTT_SERVER_SIZE; i++) {
+    mqtt_server[i] = EEPROM.read(EEPROM_MQTT_SERVER_START + i);
+  }
+  // Check if the first character is not a valid ASCII character (not printable)
+  if (mqtt_server[0] < 32 || mqtt_server[0] > 126) {
+    strcpy(mqtt_server, ""); // Set to empty string if not valid
+  }
+}
+
+
 void setup_wifi() {
-  delay(10);
-  // We start by connecting to a WiFi network
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
+  // Local initialization. Once its business is done, there is no need to keep it around
+  WiFiManager wifiManager;
 
-  WiFi.begin(ssid, password);
+  // Uncomment to reset saved WiFi credentials
+  wifiManager.resetSettings();
 
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+  // Set a custom hostname (optional)
+  wifiManager.setHostname("NodeMCU");
+
+  // Create a custom parameter for the MQTT server
+  WiFiManagerParameter custom_mqtt_server("server", "MQTT Server", mqtt_server, EEPROM_MQTT_SERVER_SIZE);
+
+  // Add custom parameters to WiFiManager
+  wifiManager.addParameter(&custom_mqtt_server);
+
+  // Automatically connect using saved credentials or begin configuration portal if none are saved
+  if (!wifiManager.autoConnect("AutoConnectAP")) {
+    Serial.println("Failed to connect and hit timeout");
+    delay(3000);
+    // Reset and try again, or maybe put it to deep sleep
+    ESP.reset();
+    delay(5000);
   }
 
-  Serial.println("");
+  // If you get here you have connected to the WiFi
   Serial.println("WiFi connected");
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
+
+  // Save the custom MQTT server parameter
+  strcpy(mqtt_server, custom_mqtt_server.getValue());
+  saveConfig();
 }
 
 void reconnect() {
@@ -43,11 +84,15 @@ void reconnect() {
       Serial.println("connected");
       // Once connected, publish an announcement...
       client.publish("OUTTopic", "hello world");
-      //... and resubscribe
+      // ... and resubscribe
       client.subscribe("smart-led/status");
+      // Indication with LED on
+      digitalWrite(connectionLed, HIGH);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
+      // Indication with LED off
+      digitalWrite(connectionLed, LOW);
       Serial.println(" try again in 5 seconds");
       // Wait 5 seconds before retrying
       delay(5000);
@@ -68,22 +113,42 @@ void onMessage(char* topic, uint8_t* payload, unsigned int length) {
 
   // Control the LED based on the message received
   if (message == "1") {
-    digitalWrite(ledPin, HIGH); // Turn the LED on
+    mqttControlled = true;
+    digitalWrite(led, HIGH); // Turn the LED on
   } else if (message == "0") {
-    digitalWrite(ledPin, LOW); // Turn the LED off
+    mqttControlled = false;
+    digitalWrite(led, LOW); // Turn the LED off
+  } else if (message == "request") {
+    // Publish the current LED state
+    if (digitalRead(led) == HIGH) {
+      client.publish("smart-led/status", "1");
+    } else {
+      client.publish("smart-led/status", "0");
+    }
   }
 }
 
 void setup() {
   Serial.begin(115200);
+
+  // Initialize EEPROM
+  EEPROM.begin(512);
+
+  // Load the MQTT server address from EEPROM
+  loadConfig();
+
+
+
   setup_wifi();
   client.setServer(mqtt_server, 1883);
 
   // Set the callback function for receiving messages
   client.setCallback(onMessage);
 
-  // Initialize the LED pin as an output
-  pinMode(ledPin, OUTPUT);
+  // Initialize the LED and motion sensor pins as an output and input respectively
+  pinMode(led, OUTPUT);
+  pinMode(connectionLed, OUTPUT);
+  pinMode(PIR_MOTION_SENSOR, INPUT);
 }
 
 void loop() {
@@ -91,4 +156,23 @@ void loop() {
     reconnect();
   }
   client.loop();
+
+  // Check the state of the motion sensor
+  bool currentMotion = digitalRead(PIR_MOTION_SENSOR);
+
+  // Only update the LED state based on motion if it's not controlled by MQTT
+  if (!mqttControlled) {
+    if (currentMotion != motionDetected) {
+      motionDetected = currentMotion;
+      if (motionDetected) {
+        digitalWrite(led, HIGH); // Turn the LED on
+        client.publish("smart-led/status", "1");
+      } else {
+        digitalWrite(led, LOW); // Turn the LED off
+        client.publish("smart-led/status", "0");
+      }
+    }
+  }
+
+  delay(200);
 }
